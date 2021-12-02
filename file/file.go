@@ -10,6 +10,7 @@ func ReadFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+<<<<<<< HEAD
 	fmt.Printf("file content is :\n%s\n", string(content))
 	return content, nil
 }
@@ -26,3 +27,9 @@ func ListDir(path string) ([]string, error) {
 	}
 	return res, nil
 }
+=======
+	fmt.Printf("file content is :%s\n", string(content))
+	return content, nil
+}
+
+>>>>>>> a6e05bab78da73abaf1053cf217094f7b30f0d7d
