@@ -8,6 +8,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
+
+	progressbar "github.com/schollz/progressbar/v3"
+	"github.com/urfave/cli/v2"
+)
+
+const (
+	page    = 5 // number of tx each request get
+	bufsize = 4 // buffer size of chan
 )
 
 type Block struct {
@@ -26,7 +36,7 @@ type Block struct {
 	Fees      uint     `json:"fees"`
 	Outputs   uint64   `json:"outputs"`
 	// Work      uint64   `json:"work"`
-	Weight    uint     `json:"weight"`
+	Weight uint `json:"weight"`
 }
 
 type Transaction struct {
@@ -67,150 +77,178 @@ type Transaction struct {
 	Weight  uint `json:"weight"`
 }
 
-// get tx input & output
-// url := "https://api.blockchain.info/haskoin-store/btc/transactions?txids=42ace0b46416a974df571b43eb9472a0e45d7436e51602bd7eded5459def3222,811981424b3e2c946b136f9781aeb8dab46c767e26043b440b57febeacdbcd34,13b4916e84da996b5c46953df97a1a0b369cac18cfd23aa3dd965817feff3629,6e6db525382675d18ca64dd651ebb8b20edf84a6302cf582d2e573707f372c52,e0f6c1ea18fe613e28500bbf3fefd569b6bc0d13e3e0cf2f4da5136cec7a2a31"
-
-// get tx_hash
-// url := "https://api.blockchain.info/haskoin-store/btc/block/0000000000000000000730d0e713fd5f9bdd385216c544ce50765cd29ee23b1c?notx=false"
-
-// get block_hash
-// url := "https://api.blockchain.info/haskoin-store/btc/block/heights?heights=712538,712539&notx=false"
-
-func check(err error) {
+func check(err error, message string) {
 	if err != nil {
+		if message != "" {
+			log.Println(message)
+		}
 		log.Fatal(err)
 	}
 }
 
-func GetBlocksByHeights(heights string, blocks *[]Block) {
-	/* construct url */
+func GetBlocksByHeights(heights string) []Block {
+	/* construct request */
 	url := fmt.Sprintf("https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false", heights)
-	fmt.Printf("Get: %s\n", url)
-
-	/* construct request */
 	req, err := http.NewRequest("GET", url, nil)
-	check(err)
+	check(err, fmt.Sprintf("request for %s failed!", url))
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
 	req.Header.Set("Content-Type", "application/json")
 
 	/* issue request and wait response*/
 	resp, err := (&http.Client{}).Do(req)
-	check(err)
+	check(err, "request failed")
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	check(err)
+	check(err, "read response failed")
 
 	/* save response */
-	err = json.Unmarshal(body, blocks)
-	check(err)
-	fmt.Printf("%s\n", "Hit success!")
+	var blocks []Block
+	err = json.Unmarshal(body, &blocks)
+	check(err, "Unmarshal failed")
+	return blocks
 }
 
-func GetTxsByHashs(txHashs string, tx *[]Transaction) {
-	/* construct url */
+func GetBlocksInRange(low int, high int) []Block {
+	var all_blocks []Block
+	for i := high; i > low; i-- {
+		blocks := GetBlocksByHeights(strconv.Itoa(i))
+		all_blocks = append(all_blocks, blocks...)
+	}
+	return all_blocks
+}
+
+func GetTxsByHashs(txHashs string) []Transaction {
+	/* construct request */
 	url := fmt.Sprintf("https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s", txHashs)
-	fmt.Printf("Get: %s\n", url)
-
-	/* construct request */
 	req, err := http.NewRequest("GET", url, nil)
-	check(err)
+	check(err, fmt.Sprintf("request for %s error!", url))
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
 	req.Header.Set("Content-Type", "application/json")
 
 	/* issue request and wait response*/
 	resp, err := (&http.Client{}).Do(req)
-	check(err)
+	check(err, "request failed")
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	check(err)
+	check(err, "read response failed")
 
 	/* save response */
-	// fmt.Printf("%s\n", string(body))
-	err = json.Unmarshal(body, tx)
-	check(err)
-	fmt.Printf("%s\n\n", "Hit success")
+	var txs []Transaction
+	err = json.Unmarshal(body, &txs)
+	check(err, "unmarshall failed")
+	return txs
 }
 
-func Crawl(url string, done chan bool) {
-	fmt.Printf("\nGet: %s\n", url)
-	resp, err := http.Get(url)
-	check(err)
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	check(err)
-	fmt.Printf("%s\n", string(body)[:50])
-	done <- true
-}
-
-func Save(path string, content []byte){
-    file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
-	check(err)
+func Save(path string, content []byte) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	check(err, "open file failed")
 	defer file.Close()
 	writer := bufio.NewWriter(file)
 	_, err = writer.Write(content)
 	writer.Flush()
-	check(err)
+	check(err, "save file failed")
 }
 
-func ExtractOneBlock(block *Block, path string){
-	/* 1. get all tx_hash in this block and construct tx_hashs*/
-	var txs []Transaction
-	tx_hashs := block.Tx[0]
-	for _, tx_hash := range block.Tx[1:]{
+func ExtractOneBlock(block *Block, page int, tx_chan chan []Transaction) {
+	p, n, tx_hashs := 0, len(block.Tx), ""
+	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, block.Height)
+	bar := GetProgressBar(n, desc)
+	var all_txs []Transaction
+	for i, tx_hash := range block.Tx {
 		tx_hashs = fmt.Sprintf("%s,%s", tx_hashs, tx_hash)
+		p++
+		// every <page> hash issue a request
+		if (p+1)%page == 0 || i == n-1 {
+			var txs []Transaction = GetTxsByHashs(tx_hashs[1:])
+			all_txs = append(all_txs, txs...)
+			p, tx_hashs = 0, ""
+			bar.Add(p)
+			bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i, n, block.Height))
+		}
 	}
-	/* 2. issue request and save response(tx json) */
-	GetTxsByHashs(tx_hashs, &txs)
-	obj, err := json.Marshal(txs)
-	check(err)
-	Save(path, obj)
+	bar.Close()
+	tx_chan <- all_txs
 }
 
-func ExtractAllBlocks(blocks []Block){
+func ExtractAllBlocks(blocks []Block, page int, bufsize int) []Transaction {
 	n := len(blocks)
-	for i, block := range blocks {
-		fmt.Printf("%d/%d: extract block with height=%d and hash=%s\n", i,n, block.Height, block.Hash)
-		path := fmt.Sprintf("height=%d.json", block.Height)
-		ExtractOneBlock(&block, path)
+	fmt.Printf("INFO: Extract block with height between %d and %d...\n", blocks[n-1].Height, blocks[0].Height)
+	var all_txs []Transaction
+	tx_chan := make(chan []Transaction, bufsize)
+	for _, block := range blocks {
+		go ExtractOneBlock(&block, page, tx_chan)
+		txs := <-tx_chan
+		all_txs = append(all_txs, txs...)
 	}
+	return all_txs
+}
+
+func GetProgressBar(max int, desc string) *progressbar.ProgressBar {
+	bar := progressbar.NewOptions(max,
+		// progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(100),
+		progressbar.OptionSetDescription(desc),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+	return bar
+}
+
+func Start(low, high int, savepath string) {
+	t1 := time.Now()
+	fmt.Println("Started at:", t1)
+	var blocks []Block = GetBlocksInRange(low, high)
+	all_txs := ExtractAllBlocks(blocks, page, bufsize)
+	obj, err := json.Marshal(all_txs)
+	check(err, "Marshal Error")
+	Save(savepath, obj)
+	t2 := time.Now()
+	fmt.Println("\nFinished at:", time.Now())
+	fmt.Printf("Time elapsed: %.2f minutes\n", t2.Sub(t1).Minutes())
 }
 
 func main() {
-	fmt.Println("---Started!---")
-	/* GET TOP N BLOCKS */
-	/* 1. construct heights*/
-	latest_block := 712603
-	heights := fmt.Sprintf("%d", latest_block)
-	// for i := latest_block-1; i > latest_block-3; i-- {
-	// 	heights = fmt.Sprintf("%s,%d", heights, i)
-	// }
-	/* 2. issue request */
-	var blocks []Block
-	GetBlocksByHeights(heights, &blocks)
-
-	/* EXTRACT TRANSACTIONS IN ALL BLOCKS */
-	ExtractAllBlocks(blocks)
-	// for i, block := range blocks {
-	// 	fmt.Printf("%d: height: %d, blockhash: %s\n", i, block.Height, block.Hash)
-	// 	/* 1. get all tx_hash in this block and construct tx_hashs*/
-	// 	var txs []Transaction
-	// 	tx_hashs := block.Tx[0]
-	// 	for _, tx_hash := range block.Tx[1:]{
-	// 		tx_hashs = fmt.Sprintf("%s,%s", tx_hashs, tx_hash)
-	// 	}
-	// 	/* 2. issue request and save response(tx json) */
-	// 	GetTxsByHashs(tx_hashs, &txs)
-	// 	obj, err := json.Marshal(txs)
-	// 	check(err)
-	// 	Save("result.json", obj)
-	// }
-	
-	// Save("a.txt", []byte("sdjhshfk"))
-	// done := make(chan bool, 5)
-	// go CrawlTx("0000000000000000000730d0e713fd5f9bdd385216c544ce50765cd29ee23b1c", done)
-	// go Crawl("https://api.blockchain.info/haskoin-store/btc/block/0000000000000000000730d0e713fd5f9bdd385216c544ce50765cd29ee23b1c?notx=false", done)
-	// <-done
-	// <-done
-	// close(done)
-	fmt.Println("---Finished!---")
+	var (
+		low, high int
+		savepath  string
+	)
+	app := &cli.App{
+		Name:  "Crawl",
+		Usage: "crawl [-l low] [-h high] [-s savepath]",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "savepath",
+				Aliases:     []string{"s"},
+				Usage:       "Save result at `SAVEPATH`",
+				Destination: &savepath,
+				Value:       "result.json",
+			},
+			&cli.IntFlag{
+				Name:        "low",
+				Aliases:     []string{"l"},
+				Usage:       "Start at block height `LOW`",
+				Destination: &low,
+				Required:    true,
+			},
+			&cli.IntFlag{
+				Name:        "high",
+				Aliases:     []string{"e"},
+				Usage:       "End at block height `HIGH`(not included)",
+				Destination: &high,
+				Required:    true,
+			},
+		},
+		Action: func(c *cli.Context) error {
+			Start(low, high, savepath)
+			return nil
+		},
+	}
+	err := app.Run(os.Args)
+	check(err, "")
 }
