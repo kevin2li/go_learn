@@ -16,6 +16,7 @@ func ListLearn() {
 	list.PushBack(3)
 	list.PushBack([]int{2, 5, 8})
 	list.PushBack("hello")
-	// push 2 items from front
 	PrintList(list)
+	// push 2 items from front
+	
 }

@@ -2,5 +2,4 @@ module github.com/kevin2li/go_learn
 
 go 1.16
 
-require "container_learn" v0.0.1
-replace "container_learn" => "./container_learn"
+require github.com/kevin2li/go_learn/container_learn v0.0.0-20211202121929-90a5629f6a1e
