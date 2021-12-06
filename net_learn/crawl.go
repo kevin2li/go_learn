@@ -18,11 +18,6 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// config
-var (
-	page = 5 // number of tx each request get
-)
-
 type Block struct {
 	Hash      string   `json:"hash"`
 	Height    uint     `json:"height"`
@@ -86,38 +81,36 @@ type Crawler struct {
 	low         int    // crawl start from this block height
 	high        int    // crawl end at this block height
 	savedir     string // result save directory
+	page        int    // number of tx each request get
+	heights     []int  // a sequence of block `heights` to download
 }
 
 func (this *Crawler) GetBlocksByHeights(heights string) ([]Block, error) {
 	/* construct request */
 	url := fmt.Sprintf("https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false", heights)
-	req, err := http.NewRequest("GET", url, nil)
-	err = ErrorWrap(err, fmt.Sprintf("request for %s failed!", url))
-	if err != nil {
-		return nil, err
-	}
+	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
 	req.Header.Set("Content-Type", "application/json")
 
 	/* issue request and wait response*/
 	resp, err := (&http.Client{}).Do(req)
-	err = ErrorWrap(err, "request failed")
 	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("request for %s failed!", url))
 		return nil, err
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	err = ErrorWrap(err, "read response failed")
 	if err != nil {
+		err = errors.Wrap(err, "read response failed")
 		return nil, err
 	}
 
 	/* save response */
 	var blocks []Block
 	err = json.Unmarshal(body, &blocks)
-	err = ErrorWrap(err, "Unmarshal failed")
 	if err != nil {
+		err = errors.Wrap(err, "unmarshall failed\n request url is: "+url+"\n response is: "+string(body)[:200])
 		return nil, err
 	}
 	return blocks, nil
@@ -127,8 +120,8 @@ func (this *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 	/* construct request */
 	url := fmt.Sprintf(this.getTxUrl, txHashs)
 	req, err := http.NewRequest("GET", url, nil)
-	err = ErrorWrap(err, fmt.Sprintf("request for %s error!", url))
 	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("request for %s error!", url))
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
@@ -136,23 +129,23 @@ func (this *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 
 	/* issue request and wait response*/
 	resp, err := (&http.Client{}).Do(req)
-	err = ErrorWrap(err, "request failed")
 	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("request for %s failed!", url))
 		return nil, err
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	err = ErrorWrap(err, "read response failed, request url is: "+url)
 	if err != nil {
+		err = errors.Wrap(err, "read response failed, request url is: "+url)
 		return nil, err
 	}
 
 	/* save response */
 	var txs []Transaction
 	err = json.Unmarshal(body, &txs)
-	err = ErrorWrap(err, "unmarshall failed\n request url is: "+url+"\n response is: "+string(body)[:200])
 	if err != nil {
+		err = errors.Wrap(err, "unmarshall failed\n request url is: "+url+"\n response is: "+string(body)[:200])
 		return nil, err
 	}
 	return txs, nil
@@ -170,7 +163,7 @@ func (this *Crawler) GetBlocksInRange() ([]Block, error) {
 	return all_blocks, nil
 }
 
-func (this *Crawler) ExtractOneBlock(block *Block, page int, done chan int) {
+func (this *Crawler) DownloadOneBlock(block *Block, done chan int) {
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("%+v\n", err)
@@ -188,7 +181,7 @@ func (this *Crawler) ExtractOneBlock(block *Block, page int, done chan int) {
 		tx_hashs = fmt.Sprintf("%s,%s", tx_hashs, tx_hash)
 		p++
 		// every `page` hash issue a request
-		if (p+1)%page == 0 || i == n-1 {
+		if (p+1)%this.page == 0 || i == n-1 {
 			txs, err := this.GetTxsByHashs(tx_hashs[1:])
 			if err != nil {
 				panic(err)
@@ -201,29 +194,28 @@ func (this *Crawler) ExtractOneBlock(block *Block, page int, done chan int) {
 	}
 	bar.Close()
 	obj, err := json.Marshal(all_txs)
-	err = ErrorWrap(err, "Marshal Error")
 	if err != nil {
-		// fmt.Printf("%+v\n", err)
+		err = errors.Wrap(err, "Marshal Error")
 		panic(err)
 	}
 	savepath := filepath.Join(this.savedir, fmt.Sprintf("block_height=%d.json", block.Height))
 	Save(savepath, obj)
 }
 
-func (this *Crawler) ExtractAllBlocks(blocks []Block, page int) {
+func (this *Crawler) DownloadAllBlocks(blocks []Block) {
 	n := len(blocks)
 	failedBlocks := make([]int, 0)
 	fmt.Printf("INFO: Download block with height between %d and %d...\n", this.low, this.high)
 	done := make(chan int, n)
 	for i := 0; i < n; i++ {
-		go this.ExtractOneBlock(&blocks[i], page, done)
+		go this.DownloadOneBlock(&blocks[i], done)
 	}
 	for i := 0; i < n; i++ {
-		h := <-done
-		if h != 0 {
+		if h := <-done; h != 0 {
 			failedBlocks = append(failedBlocks, h)
 		}
 	}
+	close(done)
 	log.Printf("Total : %d, Success: %d, Failure: %d\n", n, n-len(failedBlocks), len(failedBlocks))
 	if len(failedBlocks) > 0 {
 		sort.Ints(failedBlocks)
@@ -248,35 +240,28 @@ func GetProgressBar(max int, desc string) *pb.ProgressBar {
 	return bar
 }
 
-func ErrorWrap(err error, message string) error {
-	if err != nil {
-		err = errors.Wrap(err, message)
-		// fmt.Printf("%+v\n", err)
-		return err
-	}
-	return nil
-}
-
-func Save(path string, content []byte) {
+func Save(path string, content []byte) error {
+	// check path exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		dir := filepath.Dir(path)
 		os.MkdirAll(dir, 0766)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
-	err = ErrorWrap(err, "open file "+path+" failed")
-	if err != nil {
-		fmt.Printf("%+v\n", err)
-		return
-	}
+	// open or create file for writing
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0666)
 	defer file.Close()
+	if err != nil {
+		err = errors.Wrap(err, "open file "+path+" failed")
+		return err
+	}
+	// write content
 	writer := bufio.NewWriter(file)
 	_, err = writer.Write(content)
 	writer.Flush()
-	err = ErrorWrap(err, "save file "+path+" failed")
 	if err != nil {
-		fmt.Printf("%+v\n", err)
-		return
+		err = errors.Wrap(err, "save file "+path+" failed")
+		return err
 	}
+	return nil
 }
 
 func Start(crawler *Crawler) {
@@ -287,7 +272,7 @@ func Start(crawler *Crawler) {
 	if err != nil {
 		log.Fatalf("%+v\n", err)
 	}
-	crawler.ExtractAllBlocks(blocks, page)
+	crawler.DownloadAllBlocks(blocks)
 	t2 := time.Now()
 	log.Println("Finished!")
 	fmt.Printf("Time elapsed: %.2f minutes\n", t2.Sub(t1).Minutes())
@@ -300,7 +285,7 @@ func main() {
 	}
 	app := &cli.App{
 		Name:  "Crawl",
-		Usage: "crawl [-l low] [-h high] [-s savepath]",
+		Usage: "crawl [-l low] [-h high] [-s savedir]",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "savedir",
@@ -314,18 +299,25 @@ func main() {
 				Aliases:     []string{"l"},
 				Usage:       "Start at block height `low`",
 				Destination: &crawler.low,
-				Required:    true,
 			},
 			&cli.IntFlag{
 				Name:        "high",
 				Aliases:     []string{"e"},
 				Usage:       "End at block height `high`(not included)",
 				Destination: &crawler.high,
-				Required:    true,
+			},
+			&cli.IntSliceFlag{
+				Name:        "download",
+				Aliases:     []string{"d"},
+				Usage:       "Specify a sequence of block `heights` to download",
 			},
 		},
 		Action: func(c *cli.Context) error {
-			Start(crawler)
+			// Start(crawler)
+			fmt.Println(c.Int("d"))
+			for _, v := range c.FlagNames() {
+				fmt.Printf("%s %#v\n", v, c.Value(v))
+			}
 			return nil
 		},
 	}

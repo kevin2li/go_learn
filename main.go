@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
+	"strconv"
 
 	"github.com/pkg/errors"
 )
@@ -32,14 +32,12 @@ func mkdir() error {
 	}
 	return nil
 }
+
+func f(format string, args ...interface{}) string {
+	return fmt.Sprintf(format, args...)
+}
+
 func main() {
 	log.Println("Started!")
-	arr := []int{190, 23, 45, 42, 58}
-	fmt.Printf("%+v\n", arr)
-	arr = sort.IntSlice(arr)
-	// sort.Ints(arr)
-	sort.Sort(arr)
-	fmt.Printf("%+v\n", arr)
-	fmt.Printf("%+v\n", arr)
-
+	fmt.Printf(f("hello, %s\n", "kevin!"))
 }
