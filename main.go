@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 type Stu struct {
@@ -11,18 +13,9 @@ type Stu struct {
 }
 
 func main() {
-	fmt.Println("started!")
-	// file.ReadFile("/home/likai/code/go_program/go_learn/main.go")
-	// dirs, err := file.ListDir(".")
-	// if err != nil {
-	// 	return
-	// }
-	// fmt.Printf("%v\n", dirs)
-
-	// container_learn.ListLearn()
-	stu := Stu{"Kevin", true, 100.0}
-	fmt.Printf("\n---stu---\nvalue:\t%v,\ntype:\t%T\n------\n", stu, stu)
-	stu.Name = "Lucy"
-	fmt.Printf("\n---stu---\nvalue:\t%v,\ntype:\t%T\n------\n", stu, stu)
-	
+	path := "/home/likai/code/go_program/go_learn/main.go"
+	s := filepath.Base(path)
+	s2 := filepath.Dir(path)
+	os.Stat(path)
+	fmt.Println(s, s2)
 }
