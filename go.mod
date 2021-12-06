@@ -10,6 +10,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/kevin2li/go_learn/container_learn v0.0.0-20211202121929-90a5629f6a1e
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/schollz/progressbar/v3 v3.8.3 // indirect
 	github.com/spf13/cobra v1.2.1 // indirect
 	github.com/spf13/viper v1.9.0

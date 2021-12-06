@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
-	"path/filepath"
+
+	"github.com/pkg/errors"
 )
 
 type Stu struct {
@@ -12,10 +13,19 @@ type Stu struct {
 	Score  float64 `json:"score"`
 }
 
+func check(err error, message string) {
+	if err != nil {
+		err = errors.Wrap(err, message)
+		log.Fatalf("%+v\n", err)
+	}
+}
+func mkdir() {
+	err := os.MkdirAll("a/b/c", 0666)
+	check(err, "error creating")
+}
+
 func main() {
-	path := "/home/likai/code/go_program/go_learn/main.go"
-	s := filepath.Base(path)
-	s2 := filepath.Dir(path)
-	os.Stat(path)
-	fmt.Println(s, s2)
+	log.Println("Started!")
+	mkdir()
+	// check(err, "mkdir failed")
 }
