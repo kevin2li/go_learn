@@ -149,26 +149,42 @@ func (c *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 }
 
 func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
+	fmt.Printf("INFO: get blocks with heights %v...\n", heights)
 	var all_blocks []Block
-	for _, h := range heights {
+	var n = len(heights)
+	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, heights[0])
+	bar := GetProgressBar(n, desc)
+	for i, h := range heights {
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(h))
 		if err != nil {
 			return nil, err
 		}
 		all_blocks = append(all_blocks, blocks...)
+		bar.Add(1)
+		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i+1, n, h))
 	}
+	bar.Close()
+	fmt.Println()
 	return all_blocks, nil
 }
 
 func (c *Crawler) GetBlocksInRange(low, high int) ([]Block, error) {
+	fmt.Printf("INFO: get blocks in range [%d, %d)...\n", low, high)
 	var all_blocks []Block
+	var n = high - low
+	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, low)
+	bar := GetProgressBar(n, desc)
 	for i := low; i < high; i++ {
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(i))
 		if err != nil {
 			return nil, err
 		}
 		all_blocks = append(all_blocks, blocks...)
+		bar.Add(1)
+		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i-low+1, n, i))
 	}
+	bar.Close()
+	fmt.Println()
 	return all_blocks, nil
 }
 
@@ -202,6 +218,7 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 		}
 	}
 	bar.Close()
+	fmt.Println()
 	obj, err := json.Marshal(all_txs)
 	if err != nil {
 		err = errors.Wrap(err, "Marshal Error")
@@ -313,11 +330,10 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-			// TODO: read heights from file
-			}else if filepath != ""{
-			
+				// TODO: read heights from file
+			} else if filepath != "" {
 
-			// download txs in given heights
+				// download txs in given heights
 			} else {
 				for _, v := range args {
 					v, err := strconv.Atoi(v)

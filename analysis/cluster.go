@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 )
 
 type Transaction struct {
@@ -41,21 +42,24 @@ type Transaction struct {
 	Rbf     bool `json:"rbf"`
 	Weight  uint `json:"weight"`
 }
-var addressList []string
+
+var addressList map[string]bool
+
+var usedAddr map[string]bool
 
 // if given addr in tx inputs
-func IsInTxInputs(addr string, tx Transaction) bool{
+func IsInTxInputs(addr string, tx Transaction) bool {
 
 	return false
 }
 
 // if given addr in tx outputs
-func IsInTxOutputs(addr string, tx Transaction) bool{
+func IsInTxOutputs(addr string, tx Transaction) bool {
 
 	return false
 }
 
-func MultiInputHeuristic(addr string, tx Transaction) []string{
+func MultiInputHeuristic(addr string, tx Transaction) []string {
 
 	return nil
 }
@@ -65,24 +69,26 @@ func CoinbaseHeuristic(addr string, tx Transaction) []string {
 	return nil
 }
 
-func ChangeHeuristic(addr string, tx Transaction) []string{
+func ChangeHeuristic(addr string, tx Transaction) []string {
 
 	return nil
 }
 
-func ClusterByAddr(addr string, txs []Transaction) ([]string, error) {
+func ClusterByAddr(addr string, txs []Transaction, addrList chan []string, wg *sync.WaitGroup) error {
 	result := []string{}
 	tempTxs := []Transaction{}
 	result = append(result, addr)
-
-	// filter related transactions
+	defer func() {
+		wg.Done()
+	}()
+	// filter out unrelated transactions
 	for _, tx := range txs {
-		if IsInTxInputs(addr, tx) || IsInTxOutputs(addr, tx){
+		if IsInTxInputs(addr, tx) || IsInTxOutputs(addr, tx) {
 			tempTxs = append(tempTxs, tx)
 		}
 	}
 	// refine related address
-	for _, tx := range tempTxs{
+	for _, tx := range tempTxs {
 		// rule1
 		out := MultiInputHeuristic(addr, tx)
 		if out != nil {
@@ -99,21 +105,43 @@ func ClusterByAddr(addr string, txs []Transaction) ([]string, error) {
 			result = append(result, out...)
 		}
 	}
-
-	return result, nil
+	addrList <- result
+	return nil
 }
 
-func cluster(addr string) []string {
+func Cluster(addr string, txs []Transaction) []string {
 	fmt.Printf("%+v\n", addressList)
-	addressList = append(addressList, addr)
+	addressList[addr] = true
+	var queue = make([]string, 0)
+	queue = append(queue, addr)
+	var wg sync.WaitGroup
 
-	return addressList
+	addrList := make(chan []string, 128)
+	for len(queue) > 0 {
+		a := queue[0]
+		queue = queue[1:]
+		usedAddr[a] = true
+		wg.Add(1)
+		go ClusterByAddr(addr, txs, addrList, &wg)
+	}
+	for addrs := range <-addrList {
+		for _, addr := range addrs {
+			addressList[addr] = true
+	
+			// TODO:把未迭代的地址入队
+			if !usedAddr[addr] {
+				queue = append(queue, addr)
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {
 	fmt.Println("Started!")
-	
+	all_txs := []Transaction{}
 	addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
-	cluster(addr)
-	
+	Cluster(addr, all_txs)
+
 }
