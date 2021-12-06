@@ -41,6 +41,7 @@ type Transaction struct {
 	Rbf     bool `json:"rbf"`
 	Weight  uint `json:"weight"`
 }
+var addressList []string
 
 // if given addr in tx inputs
 func IsInTxInputs(addr string, tx Transaction) bool{
@@ -54,24 +55,65 @@ func IsInTxOutputs(addr string, tx Transaction) bool{
 	return false
 }
 
+func MultiInputHeuristic(addr string, tx Transaction) []string{
+
+	return nil
+}
+
+func CoinbaseHeuristic(addr string, tx Transaction) []string {
+
+	return nil
+}
+
+func ChangeHeuristic(addr string, tx Transaction) []string{
+
+	return nil
+}
 
 func ClusterByAddr(addr string, txs []Transaction) ([]string, error) {
 	result := []string{}
 	tempTxs := []Transaction{}
 	result = append(result, addr)
 
+	// filter related transactions
 	for _, tx := range txs {
 		if IsInTxInputs(addr, tx) || IsInTxOutputs(addr, tx){
 			tempTxs = append(tempTxs, tx)
-		}else{
-			// delete tx in txs
-
 		}
 	}
-	
+	// refine related address
+	for _, tx := range tempTxs{
+		// rule1
+		out := MultiInputHeuristic(addr, tx)
+		if out != nil {
+			result = append(result, out...)
+		}
+		// rule2
+		out = CoinbaseHeuristic(addr, tx)
+		if out != nil {
+			result = append(result, out...)
+		}
+		// rule3
+		out = ChangeHeuristic(addr, tx)
+		if out != nil {
+			result = append(result, out...)
+		}
+	}
+
 	return result, nil
+}
+
+func cluster(addr string) []string {
+	fmt.Printf("%+v\n", addressList)
+	addressList = append(addressList, addr)
+
+	return addressList
 }
 
 func main() {
 	fmt.Println("Started!")
+	
+	addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
+	cluster(addr)
+	
 }
