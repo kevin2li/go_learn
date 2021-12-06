@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"sort"
 
 	"github.com/pkg/errors"
 )
@@ -13,19 +15,31 @@ type Stu struct {
 	Score  float64 `json:"score"`
 }
 
-func check(err error, message string) {
+func ErrorWrap(err error, message string) error {
 	if err != nil {
 		err = errors.Wrap(err, message)
-		log.Fatalf("%+v\n", err)
+		// fmt.Printf("%+v\n", err)
+		return err
 	}
-}
-func mkdir() {
-	err := os.MkdirAll("a/b/c", 0666)
-	check(err, "error creating")
+	return nil
 }
 
+func mkdir() error {
+	err := os.MkdirAll("a/b/c", 0666)
+	err = ErrorWrap(err, "error creating")
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func main() {
 	log.Println("Started!")
-	mkdir()
-	// check(err, "mkdir failed")
+	arr := []int{190, 23, 45, 42, 58}
+	fmt.Printf("%+v\n", arr)
+	arr = sort.IntSlice(arr)
+	// sort.Ints(arr)
+	sort.Sort(arr)
+	fmt.Printf("%+v\n", arr)
+	fmt.Printf("%+v\n", arr)
+
 }

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -170,14 +170,16 @@ func (this *Crawler) GetBlocksInRange() ([]Block, error) {
 	return all_blocks, nil
 }
 
-func (this *Crawler) ExtractOneBlock(block *Block, page int, wg *sync.WaitGroup) {
+func (this *Crawler) ExtractOneBlock(block *Block, page int, done chan int) {
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("%+v\n", err)
+			done <- int(block.Height)
+		} else {
+			done <- 0
 		}
-		wg.Done()
 	}()
-	fmt.Printf("INFO: Extract block with height %d...\n", block.Height)
+	fmt.Printf("INFO: Download block with height %d...\n", block.Height)
 	p, n, tx_hashs := 0, len(block.Tx), ""
 	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, block.Height)
 	bar := GetProgressBar(n, desc)
@@ -210,13 +212,23 @@ func (this *Crawler) ExtractOneBlock(block *Block, page int, wg *sync.WaitGroup)
 
 func (this *Crawler) ExtractAllBlocks(blocks []Block, page int) {
 	n := len(blocks)
-	fmt.Printf("INFO: Extract block with height between %d and %d...\n", this.low, this.high)
-	var wg sync.WaitGroup
+	failedBlocks := make([]int, 0)
+	fmt.Printf("INFO: Download block with height between %d and %d...\n", this.low, this.high)
+	done := make(chan int, n)
 	for i := 0; i < n; i++ {
-		go this.ExtractOneBlock(&blocks[i], page, &wg)
-		wg.Add(1)
+		go this.ExtractOneBlock(&blocks[i], page, done)
 	}
-	wg.Wait()
+	for i := 0; i < n; i++ {
+		h := <-done
+		if h != 0 {
+			failedBlocks = append(failedBlocks, h)
+		}
+	}
+	log.Printf("Total : %d, Success: %d, Failure: %d\n", n, n-len(failedBlocks), len(failedBlocks))
+	if len(failedBlocks) > 0 {
+		sort.Ints(failedBlocks)
+		log.Printf("Failed blocks are: %v\n", failedBlocks)
+	}
 }
 
 func GetProgressBar(max int, desc string) *pb.ProgressBar {
@@ -317,9 +329,5 @@ func main() {
 			return nil
 		},
 	}
-	err := app.Run(os.Args)
-	err = ErrorWrap(err, "")
-	if err != nil {
-		log.Fatalf("%+v\n", err)
-	}
+	app.Run(os.Args)
 }
