@@ -169,7 +169,7 @@ func (c *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 }
 
 func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
-	fmt.Printf("INFO: get blocks with heights %v...\n", heights)
+	fmt.Printf("INFO: get txids in blocks with heights = %v...\n", heights)
 	var all_blocks []Block
 	var n = len(heights)
 	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, heights[0])
@@ -189,7 +189,7 @@ func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
 }
 
 func (c *Crawler) GetBlocksInRange(low, high int) ([]Block, error) {
-	fmt.Printf("INFO: get blocks in range [%d, %d)...\n", low, high)
+	fmt.Printf("INFO: get txids in blocks with heights in range [%d, %d)...\n", low, high)
 	var all_blocks []Block
 	var n = high - low
 	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, low)
@@ -231,9 +231,9 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 			request:
 			txs, err := c.GetTxsByHashs(tx_hashs[1:])
 			if err != nil {
-				if retry_times < 3 {
+				if retry_times < 5 {
 					retry_times++
-					time.Sleep(10 * time.Second)
+					time.Sleep(time.Duration(retry_times * 10) * time.Second)
 					fmt.Printf("Retry download block %d...\n", block.Height)
 					goto request
 				}
@@ -264,7 +264,7 @@ func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 	for i := 0; i < n; i++ {
 		go c.DownloadOneBlock(&blocks[i], done)
 		// decrease access frequency
-		r := 10 + rand.Intn(5)
+		r := 60 + rand.Intn(5)
 		time.Sleep(time.Duration(r) * time.Second)
 	}
 	for i := 0; i < n; i++ {
@@ -272,6 +272,7 @@ func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 			failedBlocks = append(failedBlocks, h)
 		}
 	}
+
 	close(done)
 	log.Printf("Total : %d, Success: %d, Failure: %d\n", n, n-len(failedBlocks), len(failedBlocks))
 	if len(failedBlocks) > 0 {

@@ -1,8 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"sync"
+
+	"github.com/pkg/errors"
 )
 
 type Transaction struct {
@@ -47,25 +52,85 @@ var addressList map[string]bool
 
 var usedAddr map[string]bool
 
+func ReadTransaction(path string) ([]Transaction, error) {
+	var txs []Transaction
+	obj, err := os.ReadFile(path)
+	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("read file: %s error", path))
+		return nil, err
+	}
+	err = json.Unmarshal(obj, &txs)
+	if err != nil {
+		err = errors.Wrap(err, "unmarshall error")
+		return nil, err
+	}
+	return txs, nil
+}
+
+func GetTxInAddrs(tx Transaction) []string {
+	var in_addrs []string
+	for _, utxo := range tx.Inputs {
+		in_addrs = append(in_addrs, utxo.Address)
+	}
+	return in_addrs
+}
+
+func GetTxOutAddrs(tx Transaction) []string {
+	var out_addrs []string
+	for _, utxo := range tx.Outputs {
+		out_addrs = append(out_addrs, utxo.Address)
+	}
+	return out_addrs
+}
+
 // if given addr in tx inputs
 func IsInTxInputs(addr string, tx Transaction) bool {
-
+	in_addrs := GetTxInAddrs(tx)
+	for _, cur_addr := range in_addrs {
+		if cur_addr == addr {
+			return true
+		}
+	}
 	return false
 }
 
 // if given addr in tx outputs
 func IsInTxOutputs(addr string, tx Transaction) bool {
-
+	out_addrs := GetTxOutAddrs(tx)
+	for _, cur_addr := range out_addrs {
+		if cur_addr == addr {
+			return true
+		}
+	}
 	return false
 }
 
-func MultiInputHeuristic(addr string, tx Transaction) []string {
+// remove duplicate addrs
+func Unique(addrs []string) []string {
+	result := make([]string, 0)
+	m := make(map[string]bool)
+	for _, addr := range addrs {
+		if _, ok := m[addr]; !ok {
+			result = append(result, addr)
+			m[addr] = true
+		}
+	}
+	return result
+}
 
+func MultiInputHeuristic(addr string, tx Transaction) []string {
+	if IsInTxInputs(addr, tx) {
+		in_addrs := GetTxInAddrs(tx)
+		return in_addrs
+	}
 	return nil
 }
 
 func CoinbaseHeuristic(addr string, tx Transaction) []string {
-
+	if IsInTxOutputs(addr, tx) {
+		out_addrs := GetTxOutAddrs(tx)
+		return out_addrs
+	}
 	return nil
 }
 
@@ -143,7 +208,16 @@ func main() {
 	// all_txs := []Transaction{}
 	// addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
 	// Cluster(addr, all_txs)
-	fmt.Println(100 / 20)
-	fmt.Printf("\n------\nvalue:\t%v,\ntype:\t%T\n------\n", , )
-	
+	txs, err := ReadTransaction("/home/likai/code/go_program/go_learn/result/block_height=712039.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(len(txs))
+	// fmt.Printf("%+v\n", txs[0])
+	fmt.Println("Inputs addr:")
+	tx := txs[100]
+	fmt.Printf("%+v\n", GetTxInAddrs(tx))
+	fmt.Println("Outputs addr:")
+	fmt.Printf("%+v\n", GetTxOutAddrs(tx))
+	fmt.Printf("%+v\n", Unique(GetTxInAddrs(tx)))
 }
