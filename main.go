@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -32,12 +34,46 @@ func mkdir() error {
 	}
 	return nil
 }
-
-func f(format string, args ...interface{}) string {
-	return fmt.Sprintf(format, args...)
+func Strings2Ints(strs []string) ([]int, error) {
+	var result []int
+	for _, s := range strs {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, n)
+	}
+	return result, nil
 }
 
 func main() {
 	log.Println("Started!")
-	fmt.Printf(f("hello, %s\n", "kevin!"))
+	filepath := "/home/likai/code/go_program/go_learn/heights.txt"
+
+	// heights := strings.Split(string(content), "")
+	// fmt.Printf("%+v\n", heights)
+	// fmt.Println(len(heights))
+	// for i, v := range heights {
+	// 	fmt.Println(i, v)
+	// }
+
+	// read file
+	// results := make([]string, 0)
+	heights := make([]int, 0)
+	f, err := os.OpenFile(filepath, os.O_RDONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		heights_str := strings.Split(line, " ")
+		temp_heights, _ := Strings2Ints(heights_str)
+		heights = append(heights, temp_heights...)
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%+v\n", heights)
 }

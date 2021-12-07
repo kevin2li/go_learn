@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -80,13 +82,30 @@ type Crawler struct {
 	getTxUrl    string // https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s
 	savedir     string // result save directory
 	page        int    // number of tx each request get
+	ua_pool     []string
+}
+
+func (c *Crawler) getUaPool(ua_path string) error {
+	var ua_pool []string
+	content, err := os.ReadFile(ua_path)
+	if err != nil {
+		err = errors.Wrap(err, "read ua_path failed")
+		return err
+	}
+	err = json.Unmarshal(content, &ua_pool)
+	if err != nil {
+		err = errors.Wrap(err, "unmarshall ua_pool failed")
+		return err
+	}
+	c.ua_pool = ua_pool
+	return nil
 }
 
 func (c *Crawler) GetBlocksByHeights(heights string) ([]Block, error) {
 	/* construct request */
-	url := fmt.Sprintf("https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false", heights)
+	url := fmt.Sprintf(c.getBlockUrl, heights)
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
+	req.Header.Set("User-Agent", c.ua_pool[rand.Intn(len(c.ua_pool))])
 	req.Header.Set("Content-Type", "application/json")
 
 	/* issue request and wait response*/
@@ -121,7 +140,7 @@ func (c *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 		err = errors.Wrap(err, fmt.Sprintf("request for %s error!", url))
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36 Edg/96.0.1054.41")
+	req.Header.Set("User-Agent", c.ua_pool[rand.Intn(len(c.ua_pool))])
 	req.Header.Set("Content-Type", "application/json")
 
 	/* issue request and wait response*/
@@ -234,6 +253,11 @@ func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 	done := make(chan int, n)
 	for i := 0; i < n; i++ {
 		go c.DownloadOneBlock(&blocks[i], done)
+		// // decrease access frequency, erery 20 requests wait 3~10 minutes
+		// if i%20 == 0 {
+		// 	r := 3 + rand.Intn(7)
+		// 	time.Sleep(time.Duration(r) * time.Minute)
+		// }
 	}
 	for i := 0; i < n; i++ {
 		if h := <-done; h != 0 {
@@ -265,6 +289,39 @@ func GetProgressBar(max int, desc string) *pb.ProgressBar {
 	return bar
 }
 
+func Strings2Ints(strs []string) ([]int, error) {
+	var result []int
+	for _, s := range strs {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, n)
+	}
+	return result, nil
+}
+
+func ReadHeights(path string) ([]int, error) {
+	heights := make([]int, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0666)
+	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("read %s failed", path))
+		return nil, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		heights_str := strings.Split(line, " ")
+		temp_heights, _ := Strings2Ints(heights_str)
+		heights = append(heights, temp_heights...)
+	}
+	if err := scanner.Err(); err != nil {
+		err = errors.Wrap(err, "scanner error")
+		return nil, err
+	}
+	return heights, nil
+}
 func Save(path string, content []byte) error {
 	// check path exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -293,14 +350,13 @@ func main() {
 	var crawler = &Crawler{
 		getBlockUrl: "https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false",
 		getTxUrl:    "https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s",
+		page: 5,
 	}
+	crawler.getUaPool("/home/likai/code/go_program/go_learn/net_learn/ua.json")
 
 	var (
 		isInterval bool
 		filepath   string
-		heights    []int
-		savedir    string
-		page       int = 5
 	)
 
 	var rootCmd = &cli.Command{Use: "crawler"}
@@ -319,8 +375,6 @@ func main() {
 		Run: func(cmd *cli.Command, args []string) {
 			t1 := time.Now()
 			log.Println("Started!")
-			crawler.savedir = savedir
-			crawler.page = page
 			// download txs in given block heights range
 			if isInterval {
 				low, _ := strconv.Atoi(args[0])
@@ -330,19 +384,17 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-				// TODO: read heights from file
+			// read heights from file
 			} else if filepath != "" {
-
-				// download txs in given heights
-			} else {
-				for _, v := range args {
-					v, err := strconv.Atoi(v)
-					if err != nil {
-						err = errors.Wrap(err, "")
-						log.Fatal(err)
-					}
-					heights = append(heights, v)
+				heights, _ := ReadHeights(filepath)
+				blocks, err := crawler.GetBlocks(heights)
+				if err != nil {
+					log.Fatalf("%+v\n", err)
 				}
+				crawler.DownloadAllBlocks(blocks)
+			// download txs in given heights
+			} else {
+				heights, _ := Strings2Ints(args)
 				blocks, err := crawler.GetBlocks(heights)
 				if err != nil {
 					log.Fatalf("%+v\n", err)
@@ -356,7 +408,7 @@ func main() {
 	}
 	downloadCmd.Flags().BoolVarP(&isInterval, "interval", "r", false, "")
 	downloadCmd.Flags().StringVarP(&filepath, "filepath", "f", "", "file store heights to download")
-	downloadCmd.Flags().StringVarP(&savedir, "savedir", "s", "result", "result save directory")
+	downloadCmd.Flags().StringVarP(&crawler.savedir, "savedir", "s", "result", "result save directory")
 	// Add subcommand
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.Execute()

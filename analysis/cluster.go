@@ -124,24 +124,26 @@ func Cluster(addr string, txs []Transaction) []string {
 		wg.Add(1)
 		go ClusterByAddr(addr, txs, addrList, &wg)
 	}
-	for addrs := range <-addrList {
-		for _, addr := range addrs {
-			addressList[addr] = true
-	
-			// TODO:把未迭代的地址入队
-			if !usedAddr[addr] {
-				queue = append(queue, addr)
-			}
-		}
-	}
+	// for addrs := range <-addrList {
+	// for _, addr := range addrs {
+	// 	addressList[addr] = true
+
+	// 	// TODO:把未迭代的地址入队
+	// 	if !usedAddr[addr] {
+	// 		queue = append(queue, addr)
+	// 	}
+	// }
+	// }
 
 	return nil
 }
 
 func main() {
 	fmt.Println("Started!")
-	all_txs := []Transaction{}
-	addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
-	Cluster(addr, all_txs)
-
+	// all_txs := []Transaction{}
+	// addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
+	// Cluster(addr, all_txs)
+	fmt.Println(100 / 20)
+	fmt.Printf("\n------\nvalue:\t%v,\ntype:\t%T\n------\n", , )
+	
 }
