@@ -78,11 +78,11 @@ type Transaction struct {
 }
 
 type Crawler struct {
-	getBlockUrl string // https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false
-	getTxUrl    string // https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s
-	savedir     string // result save directory
-	page        int    // number of tx each request get
-	ua_pool     []string
+	getBlockUrl string   // https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false
+	getTxUrl    string   // https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s
+	savedir     string   // result save directory
+	page        int      // number of tx each request get
+	ua_pool     []string // browser user agent pool
 }
 
 func (c *Crawler) getUaPool(ua_path string) error {
@@ -126,7 +126,7 @@ func (c *Crawler) GetBlocksByHeights(heights string) ([]Block, error) {
 	var blocks []Block
 	err = json.Unmarshal(body, &blocks)
 	if err != nil {
-		err = errors.Wrap(err, "unmarshall failed\n request url is: "+url+"\n response is: "+string(body)[:200])
+		err = errors.Wrap(err, "unmarshall failed\n request url is: " + url + "\n response is: " + string(body)[:200])
 		return nil, err
 	}
 	return blocks, nil
@@ -161,7 +161,8 @@ func (c *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 	var txs []Transaction
 	err = json.Unmarshal(body, &txs)
 	if err != nil {
-		err = errors.Wrap(err, "unmarshall failed\n request url is: "+url+"\n response is: "+string(body)[:200])
+		err = errors.Wrap(err, "unmarshall failed\n")
+		Save("error_page.html", body, os.O_CREATE|os.O_WRONLY)
 		return nil, err
 	}
 	return txs, nil
@@ -226,8 +227,16 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 		p++
 		// every `page` hash issue a request
 		if (p+1)%c.page == 0 || i == n-1 {
+			retry_times := 0
+			request:
 			txs, err := c.GetTxsByHashs(tx_hashs[1:])
 			if err != nil {
+				if retry_times < 3 {
+					retry_times++
+					time.Sleep(10 * time.Second)
+					fmt.Printf("Retry download block %d...\n", block.Height)
+					goto request
+				}
 				panic(err)
 			}
 			all_txs = append(all_txs, txs...)
@@ -244,20 +253,19 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 		panic(err)
 	}
 	savepath := filepath.Join(c.savedir, fmt.Sprintf("block_height=%d.json", block.Height))
-	Save(savepath, obj)
+	Save(savepath, obj, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 }
 
 func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 	n := len(blocks)
 	failedBlocks := make([]int, 0)
 	done := make(chan int, n)
+
 	for i := 0; i < n; i++ {
 		go c.DownloadOneBlock(&blocks[i], done)
-		// // decrease access frequency, erery 20 requests wait 3~10 minutes
-		// if i%20 == 0 {
-		// 	r := 3 + rand.Intn(7)
-		// 	time.Sleep(time.Duration(r) * time.Minute)
-		// }
+		// decrease access frequency
+		r := 10 + rand.Intn(5)
+		time.Sleep(time.Duration(r) * time.Second)
 	}
 	for i := 0; i < n; i++ {
 		if h := <-done; h != 0 {
@@ -269,6 +277,10 @@ func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 	if len(failedBlocks) > 0 {
 		sort.Ints(failedBlocks)
 		log.Printf("Failed blocks are: %v\n", failedBlocks)
+		content := fmt.Sprintf("%v\n", failedBlocks)
+		content = content[1:len(content)-2] + "\n"
+		Save("failed_block_heights.txt", []byte(content), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		log.Printf("Save failed block heights at: %s", "failed_block_heights.txt")
 	}
 }
 
@@ -322,14 +334,14 @@ func ReadHeights(path string) ([]int, error) {
 	}
 	return heights, nil
 }
-func Save(path string, content []byte) error {
+func Save(path string, content []byte, flag int) error {
 	// check path exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		dir := filepath.Dir(path)
 		os.MkdirAll(dir, 0766)
 	}
 	// open or create file for writing
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0666)
+	file, err := os.OpenFile(path, flag, 0666)
 	if err != nil {
 		err = errors.Wrap(err, "open file "+path+" failed")
 		return err
@@ -350,7 +362,7 @@ func main() {
 	var crawler = &Crawler{
 		getBlockUrl: "https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false",
 		getTxUrl:    "https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s",
-		page: 5,
+		page:        5,
 	}
 	crawler.getUaPool("/home/likai/code/go_program/go_learn/net_learn/ua.json")
 
@@ -384,7 +396,7 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-			// read heights from file
+				// read heights from file
 			} else if filepath != "" {
 				heights, _ := ReadHeights(filepath)
 				blocks, err := crawler.GetBlocks(heights)
@@ -392,7 +404,7 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-			// download txs in given heights
+				// download txs in given heights
 			} else {
 				heights, _ := Strings2Ints(args)
 				blocks, err := crawler.GetBlocks(heights)

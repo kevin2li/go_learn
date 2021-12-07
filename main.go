@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -46,34 +43,23 @@ func Strings2Ints(strs []string) ([]int, error) {
 	return result, nil
 }
 
+func fibonacci(n int, c chan int) {
+	x, y := 0, 1
+	for i := 0; i < n; i++ {
+		c <- x
+		x, y = y, x+y
+	}
+	close(c)
+}
+
 func main() {
-	log.Println("Started!")
-	filepath := "/home/likai/code/go_program/go_learn/heights.txt"
-
-	// heights := strings.Split(string(content), "")
-	// fmt.Printf("%+v\n", heights)
-	// fmt.Println(len(heights))
-	// for i, v := range heights {
-	// 	fmt.Println(i, v)
-	// }
-
-	// read file
-	// results := make([]string, 0)
-	heights := make([]int, 0)
-	f, err := os.OpenFile(filepath, os.O_RDONLY, 0666)
-	if err != nil {
-		log.Fatal(err)
+	c := make(chan int, 10)
+	go fibonacci(cap(c), c)
+	// range 函数遍历每个从通道接收到的数据，因为 c 在发送完 10 个
+	// 数据之后就关闭了通道，所以这里我们 range 函数在接收到 10 个数据
+	// 之后就结束了。如果上面的 c 通道不关闭，那么 range 函数就不
+	// 会结束，从而在接收第 11 个数据的时候就阻塞了。
+	for v := range c {
+		fmt.Println(v)
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		heights_str := strings.Split(line, " ")
-		temp_heights, _ := Strings2Ints(heights_str)
-		heights = append(heights, temp_heights...)
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("%+v\n", heights)
 }
