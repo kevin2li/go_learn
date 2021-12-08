@@ -112,10 +112,10 @@ func ReadTransactionDir(blockDir string) ([]Transaction, error) {
 		log.Fatal(err)
 	}
 	n := len(files)
-	bar := GetProgressBar(n, "")
-	for i, file := range files {
+	bar := GetProgressBar(n)
+	for _, file := range files {
 		block_height_path := filepath.Join(blockDir, file.Name())
-		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] %s", i+1, n, file.Name()))
+		bar.Describe(fmt.Sprintf("loading tx in %s:", file.Name()))
 		txs, err := ReadTransaction(block_height_path)
 		if err != nil {
 			err = errors.Wrap(err, fmt.Sprintf("read %s error", block_height_path))
@@ -257,13 +257,17 @@ iter:
 	return result
 }
 
-func GetProgressBar(max int, desc string) *pb.ProgressBar {
+func GetProgressBar(max int) *pb.ProgressBar {
 	bar := pb.NewOptions(max,
 		// pb.OptionSetWriter(ansi.NewAnsiStdout()),
 		pb.OptionEnableColorCodes(true),
 		pb.OptionShowBytes(true),
-		pb.OptionSetWidth(50),
-		pb.OptionSetDescription(desc),
+		pb.OptionSetWidth(15),
+		pb.OptionShowCount(),
+		pb.OptionThrottle(65*time.Millisecond),
+		pb.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
 		pb.OptionSetTheme(pb.Theme{
 			Saucer:        "[green]=[reset]",
 			SaucerHead:    "[green]>[reset]",
@@ -305,7 +309,6 @@ func StartCluster(dataset_path string, start_addr string){
 		log.Fatal(err)
 	}
 	fmt.Println("INFO: Load all transactions done!")
-	start_addr = "1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"
 	fmt.Printf("INFO: Start cluster from address: %s!\n", start_addr)
 	result := Cluster(start_addr, all_txs)
 	fmt.Println("\n--------------------------------Cluster Finished!--------------------------------")

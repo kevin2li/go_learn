@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -14,52 +17,40 @@ type Stu struct {
 	Score  float64 `json:"score"`
 }
 
-func ErrorWrap(err error, message string) error {
+func Save(path string, content []byte, flag int) error {
+	// check path exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		dir := filepath.Dir(path)
+		os.MkdirAll(dir, 0766)
+	}
+	// open or create file for writing
+	file, err := os.OpenFile(path, flag, 0666)
 	if err != nil {
-		err = errors.Wrap(err, message)
-		// fmt.Printf("%+v\n", err)
+		err = errors.Wrap(err, fmt.Sprintf("Open file `%s` error", path))
+		return err
+	}
+	defer file.Close()
+	// write content
+	writer := bufio.NewWriter(file)
+	_, err = writer.Write(content)
+	writer.Flush()
+	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("save file `%s` error", path))
 		return err
 	}
 	return nil
-}
-
-func mkdir() error {
-	err := os.MkdirAll("a/b/c", 0666)
-	err = ErrorWrap(err, "error creating")
-	if err != nil {
-		return err
-	}
-	return nil
-}
-func Strings2Ints(strs []string) ([]int, error) {
-	var result []int
-	for _, s := range strs {
-		n, err := strconv.Atoi(s)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, n)
-	}
-	return result, nil
-}
-
-func fibonacci(n int, c chan int) {
-	x, y := 0, 1
-	for i := 0; i < n; i++ {
-		c <- x
-		x, y = y, x+y
-	}
-	close(c)
 }
 
 func main() {
-	c := make(chan int, 10)
-	go fibonacci(cap(c), c)
-	// range 函数遍历每个从通道接收到的数据，因为 c 在发送完 10 个
-	// 数据之后就关闭了通道，所以这里我们 range 函数在接收到 10 个数据
-	// 之后就结束了。如果上面的 c 通道不关闭，那么 range 函数就不
-	// 会结束，从而在接收第 11 个数据的时候就阻塞了。
-	for v := range c {
-		fmt.Println(v)
+	var result []string
+	result_dir := "/home/likai/code/go_program/go_learn/result"
+	for i := 712000; i < 712800; i++ {
+		path := filepath.Join(result_dir, fmt.Sprintf("block_height=%d.json", i))
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			result = append(result, strconv.Itoa(i))
+		}
 	}
+	fmt.Println("total: ", len(result))
+	content := strings.Join(result, " ")
+	Save("failed_block.txt", []byte(content), os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 }

@@ -172,19 +172,17 @@ func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
 	fmt.Printf("INFO: get txids in blocks with heights = %v...\n", heights)
 	var all_blocks []Block
 	var n = len(heights)
-	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, heights[0])
-	bar := GetProgressBar(n, desc)
-	for i, h := range heights {
+	bar := GetProgressBar(n)
+	for _, h := range heights {
+		bar.Describe(fmt.Sprintf("download txids in block %d :", h))
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(h))
 		if err != nil {
 			return nil, err
 		}
 		all_blocks = append(all_blocks, blocks...)
 		bar.Add(1)
-		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i+1, n, h))
 	}
 	bar.Close()
-	fmt.Println()
 	return all_blocks, nil
 }
 
@@ -192,19 +190,17 @@ func (c *Crawler) GetBlocksInRange(low, high int) ([]Block, error) {
 	fmt.Printf("INFO: get txids in blocks with heights in range [%d, %d)...\n", low, high)
 	var all_blocks []Block
 	var n = high - low
-	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, low)
-	bar := GetProgressBar(n, desc)
+	bar := GetProgressBar(n)
 	for i := low; i < high; i++ {
+		bar.Describe(fmt.Sprintf("downloading txids in block %d :", i))
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(i))
 		if err != nil {
 			return nil, err
 		}
 		all_blocks = append(all_blocks, blocks...)
 		bar.Add(1)
-		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i-low+1, n, i))
 	}
 	bar.Close()
-	fmt.Println()
 	return all_blocks, nil
 }
 
@@ -217,10 +213,10 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 			done <- 0
 		}
 	}()
-	fmt.Printf("INFO: Download block at height %d...\n", block.Height)
+	fmt.Printf("INFO: Downloading block at height %d...\n", block.Height)
 	p, n, tx_hashs := 0, len(block.Tx), ""
-	desc := fmt.Sprintf("[cyan][1/%d][reset] Block %d:", n, block.Height)
-	bar := GetProgressBar(n, desc)
+	bar := GetProgressBar(n)
+	bar.Describe(fmt.Sprintf("download block %d:", block.Height))
 	var all_txs []Transaction
 	for i, tx_hash := range block.Tx {
 		tx_hashs = fmt.Sprintf("%s,%s", tx_hashs, tx_hash)
@@ -234,7 +230,7 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 				if retry_times < 5 {
 					retry_times++
 					time.Sleep(time.Duration(retry_times*10) * time.Second)
-					fmt.Printf("Retry download block %d...\n", block.Height)
+					fmt.Printf("Retry download block %d for the %d-th time...\n", block.Height, retry_times)
 					goto request
 				}
 				panic(err)
@@ -242,11 +238,9 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 			all_txs = append(all_txs, txs...)
 			bar.Add(p)
 			p, tx_hashs = 0, ""
-			bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] Block %d:", i, n, block.Height))
 		}
 	}
 	bar.Close()
-	fmt.Println()
 	obj, err := json.Marshal(all_txs)
 	if err != nil {
 		err = errors.Wrap(err, "Marshal Error")
@@ -286,13 +280,17 @@ func (c *Crawler) DownloadAllBlocks(blocks []Block) {
 	}
 }
 
-func GetProgressBar(max int, desc string) *pb.ProgressBar {
+func GetProgressBar(max int) *pb.ProgressBar {
 	bar := pb.NewOptions(max,
 		// pb.OptionSetWriter(ansi.NewAnsiStdout()),
 		pb.OptionEnableColorCodes(true),
 		pb.OptionShowBytes(true),
-		pb.OptionSetWidth(100),
-		pb.OptionSetDescription(desc),
+		pb.OptionSetWidth(40),
+		pb.OptionShowCount(),
+		pb.OptionThrottle(65*time.Millisecond),
+		pb.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
 		pb.OptionSetTheme(pb.Theme{
 			Saucer:        "[green]=[reset]",
 			SaucerHead:    "[green]>[reset]",
@@ -336,6 +334,7 @@ func ReadHeights(path string) ([]int, error) {
 	}
 	return heights, nil
 }
+
 func Save(path string, content []byte, flag int) error {
 	// check path exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -364,7 +363,7 @@ func main() {
 	var crawler = &Crawler{
 		getBlockUrl: "https://api.blockchain.info/haskoin-store/btc/block/heights?heights=%s&notx=false",
 		getTxUrl:    "https://api.blockchain.info/haskoin-store/btc/transactions?txids=%s",
-		page:        5,
+		page:        10,
 	}
 	crawler.getUaPool("/home/likai/code/go_program/go_learn/net_learn/ua.json")
 
@@ -398,7 +397,7 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-				// read heights from file
+			// read heights from file
 			} else if filepath != "" {
 				heights, _ := ReadHeights(filepath)
 				blocks, err := crawler.GetBlocks(heights)
@@ -406,7 +405,7 @@ func main() {
 					log.Fatalf("%+v\n", err)
 				}
 				crawler.DownloadAllBlocks(blocks)
-				// download txs in given heights
+			// download txs in given heights
 			} else {
 				heights, _ := Strings2Ints(args)
 				blocks, err := crawler.GetBlocks(heights)
