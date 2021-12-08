@@ -254,6 +254,7 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 	}
 	savepath := filepath.Join(c.savedir, fmt.Sprintf("block_height=%d.json", block.Height))
 	Save(savepath, obj, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
+	fmt.Printf("INFO: Block %d download success!\n", block.Height)
 }
 
 func (c *Crawler) DownloadAllBlocks(blocks []Block) {

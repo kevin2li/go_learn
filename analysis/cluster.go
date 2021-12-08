@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/pkg/errors"
+	pb "github.com/schollz/progressbar/v3"
+	cli "github.com/spf13/cobra"
 )
 
 type Transaction struct {
@@ -100,6 +105,29 @@ func ReadTransaction(path string) ([]Transaction, error) {
 	return txs, nil
 }
 
+func ReadTransactionDir(blockDir string) ([]Transaction, error) {
+	var all_txs []Transaction
+	files, err := os.ReadDir(blockDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	n := len(files)
+	bar := GetProgressBar(n, "")
+	for i, file := range files {
+		block_height_path := filepath.Join(blockDir, file.Name())
+		bar.Describe(fmt.Sprintf("[cyan][%d/%d][reset] %s", i+1, n, file.Name()))
+		txs, err := ReadTransaction(block_height_path)
+		if err != nil {
+			err = errors.Wrap(err, fmt.Sprintf("read %s error", block_height_path))
+			return nil, err
+		}
+		all_txs = append(all_txs, txs...)
+		bar.Add(1)
+	}
+	bar.Close()
+	return all_txs, nil
+}
+
 func GetTxInAddrs(tx Transaction) []string {
 	var in_addrs []string
 	for _, utxo := range tx.Inputs {
@@ -114,6 +142,11 @@ func GetTxOutAddrs(tx Transaction) []string {
 		out_addrs = append(out_addrs, utxo.Address)
 	}
 	return out_addrs
+}
+
+func GetTxTime(tx Transaction) string {
+	timeLayout := "2006-01-02 15:04:05"
+	return time.Unix(int64(tx.Time), 0).Format(timeLayout)
 }
 
 // if given addr in tx inputs
@@ -158,7 +191,7 @@ func CoinbaseHeuristic(addr string, tx Transaction) []string {
 	return nil
 }
 
-// TODO
+// TODO: ChangeHeuristic
 func ChangeHeuristic(addr string, tx Transaction) []string {
 
 	return nil
@@ -201,10 +234,10 @@ iter:
 	addrList := make(chan []string, n)
 	for i := 0; i < n; i++ {
 		addr := queue[i]
-		fmt.Printf("[%d/%d] Start cluster from address: %s...\n", i+1, n, addr)
+		fmt.Printf("[%d/%d] Starting cluster from address: %s\n", i+1, n, addr)
 		go ClusterByAddr(addr, txs, addrList)
 	}
-	queue = make([]string, 0)
+	queue = make([]string, 0) // clear queue
 	for i := 0; i < n; i++ {
 		addrs := <-addrList
 		for _, addr := range addrs {
@@ -216,7 +249,7 @@ iter:
 	}
 	// whether have new address
 	if len(queue) > 0 {
-		fmt.Printf("new addresses added: %+v\n", queue)
+		fmt.Printf("INFO: new addresses added: %+v\n\n", queue)
 		iterations++
 		goto iter
 	}
@@ -224,18 +257,91 @@ iter:
 	return result
 }
 
-func main() {
-	txs, err := ReadTransaction("/home/likai/code/go_program/go_learn/result/block_height=712039.json")
+func GetProgressBar(max int, desc string) *pb.ProgressBar {
+	bar := pb.NewOptions(max,
+		// pb.OptionSetWriter(ansi.NewAnsiStdout()),
+		pb.OptionEnableColorCodes(true),
+		pb.OptionShowBytes(true),
+		pb.OptionSetWidth(50),
+		pb.OptionSetDescription(desc),
+		pb.OptionSetTheme(pb.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+	return bar
+}
+
+func Save(path string, content []byte, flag int) error {
+	// check path exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		dir := filepath.Dir(path)
+		os.MkdirAll(dir, 0766)
+	}
+	// open or create file for writing
+	file, err := os.OpenFile(path, flag, 0666)
+	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("Open file `%s` error", path))
+		return err
+	}
+	defer file.Close()
+	// write content
+	writer := bufio.NewWriter(file)
+	_, err = writer.Write(content)
+	writer.Flush()
+	if err != nil {
+		err = errors.Wrap(err, fmt.Sprintf("save file `%s` error", path))
+		return err
+	}
+	return nil
+}
+
+func StartCluster(dataset_path string, start_addr string){
+	fmt.Println("INFO: Loading transactions....")
+	all_txs, err := ReadTransaction(dataset_path)
 	if err != nil {
 		log.Fatal(err)
 	}
-	start_addr := "209140e6850ff1bda7ca9e49492d5e9741333be5ae9adc6886e45ba46fdd6800"
+	fmt.Println("INFO: Load all transactions done!")
+	start_addr = "1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"
 	fmt.Printf("INFO: Start cluster from address: %s!\n", start_addr)
-	result := Cluster(start_addr, txs)
-	fmt.Println("--------------------------------Cluster Finished!--------------------------------")
-	fmt.Printf("INFO: Final cluster result: %v\n", result)
+	result := Cluster(start_addr, all_txs)
+	fmt.Println("\n--------------------------------Cluster Finished!--------------------------------")
+	fmt.Printf("INFO: cluster total %d addresses, final cluster result:\n %v\n", len(result), result)
+}
 
-	// for _, tx := range txs {
-	// 	fmt.Println(tx.Txid, len(GetTxInAddrs(tx)))
-	// }
+func main() {
+	var (
+		dataset_path string // all_txs.json
+		start_addr   string // 1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY
+	)
+	var rootCmd = &cli.Command{Use: "analyzer"}
+
+	var clusterCmd = &cli.Command{
+		Use:   "cluster -f [dataset_path] [address]",
+		Short: "cluster address in given transcation dataset",
+		Long:  `cluster address in given transcation dataset.`,
+		Args: func(cmd *cli.Command, args []string) error {
+			if len(args) != 1 {
+				return errors.New("you should only give one argument!")
+			}
+			return nil
+		},
+		Run: func(cmd *cli.Command, args []string) {
+			t1 := time.Now()
+			log.Println("Started!")
+			start_addr = args[0]
+			StartCluster(dataset_path, start_addr)
+			t2 := time.Now()
+			log.Println("Finished!")
+			fmt.Printf("Time elapsed: %.2f minutes\n", t2.Sub(t1).Minutes())
+		},
+	}
+	clusterCmd.Flags().StringVarP(&dataset_path, "dataset_path", "f", "", "path to load transcation dataset")
+	clusterCmd.MarkFlagRequired("dataset_path")
+	// Add subcommand
+	rootCmd.AddCommand(clusterCmd)
+	rootCmd.Execute()
 }
