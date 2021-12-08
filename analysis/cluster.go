@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -48,9 +47,43 @@ type Transaction struct {
 	Weight  uint `json:"weight"`
 }
 
-var addressList map[string]bool
+type HashSet map[string]bool
 
-var usedAddr map[string]bool
+func (h HashSet) Len() int {
+	return len(h)
+}
+
+func (h HashSet) Add(s string) {
+	if _, ok := h[s]; !ok {
+		h[s] = true
+	}
+}
+
+func (h HashSet) Remove(s string) error {
+	if _, ok := h[s]; !ok {
+		return errors.New(fmt.Sprintf("KeyError: Key `%s` does not exist!", s))
+	}
+	delete(h, s)
+	return nil
+}
+
+func (h HashSet) GetData() []string {
+	var result []string
+	for k := range h {
+		result = append(result, k)
+	}
+	return result
+}
+
+// remove duplicate addrs
+func Unique(addrs []string) []string {
+	set := make(HashSet)
+	for _, addr := range addrs {
+		set.Add(addr)
+	}
+	result := set.GetData()
+	return result
+}
 
 func ReadTransaction(path string) ([]Transaction, error) {
 	var txs []Transaction
@@ -105,17 +138,8 @@ func IsInTxOutputs(addr string, tx Transaction) bool {
 	return false
 }
 
-// remove duplicate addrs
-func Unique(addrs []string) []string {
-	result := make([]string, 0)
-	m := make(map[string]bool)
-	for _, addr := range addrs {
-		if _, ok := m[addr]; !ok {
-			result = append(result, addr)
-			m[addr] = true
-		}
-	}
-	return result
+func IsCoinbaseTx(tx Transaction) bool {
+	return tx.Inputs[0].Coinbase
 }
 
 func MultiInputHeuristic(addr string, tx Transaction) []string {
@@ -127,33 +151,23 @@ func MultiInputHeuristic(addr string, tx Transaction) []string {
 }
 
 func CoinbaseHeuristic(addr string, tx Transaction) []string {
-	if IsInTxOutputs(addr, tx) {
+	if IsCoinbaseTx(tx) && IsInTxOutputs(addr, tx) {
 		out_addrs := GetTxOutAddrs(tx)
 		return out_addrs
 	}
 	return nil
 }
 
+// TODO
 func ChangeHeuristic(addr string, tx Transaction) []string {
 
 	return nil
 }
 
-func ClusterByAddr(addr string, txs []Transaction, addrList chan []string, wg *sync.WaitGroup) error {
-	result := []string{}
-	tempTxs := []Transaction{}
+func ClusterByAddr(addr string, txs []Transaction, addrList chan []string) {
+	var result []string
 	result = append(result, addr)
-	defer func() {
-		wg.Done()
-	}()
-	// filter out unrelated transactions
 	for _, tx := range txs {
-		if IsInTxInputs(addr, tx) || IsInTxOutputs(addr, tx) {
-			tempTxs = append(tempTxs, tx)
-		}
-	}
-	// refine related address
-	for _, tx := range tempTxs {
 		// rule1
 		out := MultiInputHeuristic(addr, tx)
 		if out != nil {
@@ -170,54 +184,58 @@ func ClusterByAddr(addr string, txs []Transaction, addrList chan []string, wg *s
 			result = append(result, out...)
 		}
 	}
+	result = Unique(result)
 	addrList <- result
-	return nil
 }
 
 func Cluster(addr string, txs []Transaction) []string {
-	fmt.Printf("%+v\n", addressList)
-	addressList[addr] = true
+	var finalAddrList = make(HashSet)
+	finalAddrList.Add(addr)
 	var queue = make([]string, 0)
 	queue = append(queue, addr)
-	var wg sync.WaitGroup
-
-	addrList := make(chan []string, 128)
-	for len(queue) > 0 {
-		a := queue[0]
-		queue = queue[1:]
-		usedAddr[a] = true
-		wg.Add(1)
-		go ClusterByAddr(addr, txs, addrList, &wg)
+	var iterations = 1
+iter:
+	fmt.Printf("================================Iteration %d started!================================\n", iterations)
+	fmt.Printf("INFO: total: %d addresses.\n", len(queue))
+	var n = len(queue)
+	addrList := make(chan []string, n)
+	for i := 0; i < n; i++ {
+		addr := queue[i]
+		fmt.Printf("[%d/%d] Start cluster from address: %s...\n", i+1, n, addr)
+		go ClusterByAddr(addr, txs, addrList)
 	}
-	// for addrs := range <-addrList {
-	// for _, addr := range addrs {
-	// 	addressList[addr] = true
-
-	// 	// TODO:把未迭代的地址入队
-	// 	if !usedAddr[addr] {
-	// 		queue = append(queue, addr)
-	// 	}
-	// }
-	// }
-
-	return nil
+	queue = make([]string, 0)
+	for i := 0; i < n; i++ {
+		addrs := <-addrList
+		for _, addr := range addrs {
+			if _, ok := finalAddrList[addr]; !ok {
+				queue = append(queue, addr)
+				finalAddrList.Add(addr)
+			}
+		}
+	}
+	// whether have new address
+	if len(queue) > 0 {
+		fmt.Printf("new addresses added: %+v\n", queue)
+		iterations++
+		goto iter
+	}
+	result := finalAddrList.GetData()
+	return result
 }
 
 func main() {
-	fmt.Println("Started!")
-	// all_txs := []Transaction{}
-	// addr := "3GpMzyMNaZkN5Lp7vHx7hpT3bQqc97zPb2"
-	// Cluster(addr, all_txs)
 	txs, err := ReadTransaction("/home/likai/code/go_program/go_learn/result/block_height=712039.json")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(len(txs))
-	// fmt.Printf("%+v\n", txs[0])
-	fmt.Println("Inputs addr:")
-	tx := txs[100]
-	fmt.Printf("%+v\n", GetTxInAddrs(tx))
-	fmt.Println("Outputs addr:")
-	fmt.Printf("%+v\n", GetTxOutAddrs(tx))
-	fmt.Printf("%+v\n", Unique(GetTxInAddrs(tx)))
+	start_addr := "209140e6850ff1bda7ca9e49492d5e9741333be5ae9adc6886e45ba46fdd6800"
+	fmt.Printf("INFO: Start cluster from address: %s!\n", start_addr)
+	result := Cluster(start_addr, txs)
+	fmt.Println("--------------------------------Cluster Finished!--------------------------------")
+	fmt.Printf("INFO: Final cluster result: %v\n", result)
+
+	// for _, tx := range txs {
+	// 	fmt.Println(tx.Txid, len(GetTxInAddrs(tx)))
+	// }
 }

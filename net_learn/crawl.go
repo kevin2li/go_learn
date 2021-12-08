@@ -126,7 +126,7 @@ func (c *Crawler) GetBlocksByHeights(heights string) ([]Block, error) {
 	var blocks []Block
 	err = json.Unmarshal(body, &blocks)
 	if err != nil {
-		err = errors.Wrap(err, "unmarshall failed\n request url is: " + url + "\n response is: " + string(body)[:200])
+		err = errors.Wrap(err, fmt.Sprintf("unmarshall error, response is:\n %s", string(body)[:200]))
 		return nil, err
 	}
 	return blocks, nil
@@ -153,7 +153,7 @@ func (c *Crawler) GetTxsByHashs(txHashs string) ([]Transaction, error) {
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		err = errors.Wrap(err, "read response failed, request url is: "+url)
+		err = errors.Wrap(err, fmt.Sprintf("read response failed, request url is: %s", url))
 		return nil, err
 	}
 
@@ -228,12 +228,12 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 		// every `page` hash issue a request
 		if (p+1)%c.page == 0 || i == n-1 {
 			retry_times := 0
-			request:
+		request:
 			txs, err := c.GetTxsByHashs(tx_hashs[1:])
 			if err != nil {
 				if retry_times < 5 {
 					retry_times++
-					time.Sleep(time.Duration(retry_times * 10) * time.Second)
+					time.Sleep(time.Duration(retry_times*10) * time.Second)
 					fmt.Printf("Retry download block %d...\n", block.Height)
 					goto request
 				}
@@ -344,7 +344,7 @@ func Save(path string, content []byte, flag int) error {
 	// open or create file for writing
 	file, err := os.OpenFile(path, flag, 0666)
 	if err != nil {
-		err = errors.Wrap(err, "open file "+path+" failed")
+		err = errors.Wrap(err, fmt.Sprintf("Open file `%s` error", path))
 		return err
 	}
 	defer file.Close()
@@ -353,7 +353,7 @@ func Save(path string, content []byte, flag int) error {
 	_, err = writer.Write(content)
 	writer.Flush()
 	if err != nil {
-		err = errors.Wrap(err, "save file "+path+" failed")
+		err = errors.Wrap(err, fmt.Sprintf("save file `%s` error", path))
 		return err
 	}
 	return nil
