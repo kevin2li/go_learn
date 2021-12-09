@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/pkg/errors"
+	pb "github.com/schollz/progressbar/v3"
 )
 
 type Transaction struct {
@@ -48,6 +50,8 @@ type Transaction struct {
 	Weight  uint `json:"weight"`
 }
 
+type Params = map[string]interface{}
+
 func ReadTransaction(path string) ([]Transaction, error) {
 	var txs []Transaction
 	obj, err := os.ReadFile(path)
@@ -66,7 +70,9 @@ func ReadTransaction(path string) ([]Transaction, error) {
 func GetTxInAddrs(tx Transaction) []string {
 	var in_addrs []string
 	for _, utxo := range tx.Inputs {
-		in_addrs = append(in_addrs, utxo.Address)
+		if utxo.Address != "" {
+			in_addrs = append(in_addrs, utxo.Address)
+		}
 	}
 	return in_addrs
 }
@@ -74,25 +80,52 @@ func GetTxInAddrs(tx Transaction) []string {
 func GetTxOutAddrs(tx Transaction) []string {
 	var out_addrs []string
 	for _, utxo := range tx.Outputs {
-		out_addrs = append(out_addrs, utxo.Address)
+		if utxo.Address != "" {
+			out_addrs = append(out_addrs, utxo.Address)
+		}
 	}
 	return out_addrs
+}
+
+func GetTxTime(tx Transaction) string {
+	timeLayout := "2006-01-02 15:04:05"
+	return time.Unix(int64(tx.Time), 0).Format(timeLayout)
 }
 
 func InsertTransaction(driver neo4j.Driver, tx Transaction) error {
 	session := driver.NewSession(neo4j.SessionConfig{})
 	defer session.Close()
 	in_addrs, out_addrs := GetTxInAddrs(tx), GetTxOutAddrs(tx)
-	// var cql = "MERGE (addr1:Addr { address: $address1, name: $address1 })-[:Transfer]->(tx:Transaction { id: $txid, name: $txid })-[:Transfer]->(addr2:Addr { address: $address2, name: $address2 }) RETURN addr1, addr2, tx"
-	var input_cql = "MERGE (addr1:Addr { address: $address1, name: $address1 })-[:Transfer]->(tx:Transaction { id: $txid, name: $txid }) RETURN addr1, tx;"
-	var output_cql = "MERGE (tx:Transaction { id: $txid, name: $txid })-[:Transfer]->(addr2:Addr { address: $address2, name: $address2 }) RETURN addr2, tx"
+	var createTx_cql = "MERGE (tx:Transaction {id: $txid, name: $txid}, in_degree: $in_degree, out_degree: $out_degree, time: $time, height: $height)"
+	// 1. create tx node
+	params := Params{
+		"txid": tx.Txid,
+		"in_degree": len(in_addrs),
+		"out_degree": len(out_addrs),
+		"time": GetTxTime(tx),
+		"height": tx.Block.Height,
+	}
+	var insertInputFn = func(tx neo4j.Transaction) (interface{}, error) {
+		records, err := tx.Run(createTx_cql, params)
+		if err != nil {
+			return nil, err
+		}
+		return records, nil
+	}
+	_, err := session.WriteTransaction(insertInputFn)
+	if err != nil {
+		err = errors.Wrap(err, "insert transaction failed!")
+		return err
+	}
+	// 2. create tx input addrs node
 	for _, addr := range in_addrs {
-		params := map[string]interface{}{
+		params := Params{
 			"address1": addr,
 			"txid":     tx.Txid,
 		}
+		// create addr node
 		var insertInputFn = func(tx neo4j.Transaction) (interface{}, error) {
-			records, err := tx.Run(input_cql, params)
+			records, err := tx.Run("MERGE (addr1:Addr { address: $address1, name: $address1 }) RETURN addr1", params)
 			if err != nil {
 				return nil, err
 			}
@@ -103,26 +136,75 @@ func InsertTransaction(driver neo4j.Driver, tx Transaction) error {
 			err = errors.Wrap(err, "insert transaction failed!")
 			return err
 		}
-	}
-	for _, addr := range out_addrs {
-		params := map[string]interface{}{
-			"address2": addr,
-			"txid":     tx.Txid,
-		}
-		var insertInputFn = func(tx neo4j.Transaction) (interface{}, error) {
-			records, err := tx.Run(output_cql, params)
+		// create relationship
+		insertInputFn = func(tx neo4j.Transaction) (interface{}, error) {
+			records, err := tx.Run("MATCH (addr1:Addr { address: $address1, name: $address1 }), (tx:Transaction {id: $txid, name: $txid}) CREATE (addr1)-[:In]->(tx)  RETURN addr1, tx", params)
 			if err != nil {
 				return nil, err
 			}
 			return records, nil
 		}
-		_, err := session.WriteTransaction(insertInputFn)
+		_, err = session.WriteTransaction(insertInputFn)
+		if err != nil {
+			err = errors.Wrap(err, "insert transaction failed!")
+			return err
+		}
+	}
+	// 3. create tx output addrs node
+	for _, addr := range out_addrs {
+		params := Params{
+			"address2": addr,
+			"txid":     tx.Txid,
+		}
+		// create addr node
+		var insertOutputFn = func(tx neo4j.Transaction) (interface{}, error) {
+			records, err := tx.Run("MERGE (addr2:Addr { address: $address2, name: $address2 }) RETURN addr2", params)
+			if err != nil {
+				return nil, err
+			}
+			return records, nil
+		}
+		_, err := session.WriteTransaction(insertOutputFn)
+		if err != nil {
+			err = errors.Wrap(err, "insert transaction failed!")
+			return err
+		}
+		// create relationship
+		insertOutputFn = func(tx neo4j.Transaction) (interface{}, error) {
+			records, err := tx.Run("MATCH (addr2:Addr { address: $address2, name: $address2 }), (tx:Transaction {id: $txid, name: $txid}) CREATE (tx)-[:Out]->(addr2) RETURN addr2, tx", params)
+			if err != nil {
+				return nil, err
+			}
+			return records, nil
+		}
+		_, err = session.WriteTransaction(insertOutputFn)
 		if err != nil {
 			err = errors.Wrap(err, "insert transaction failed!")
 			return err
 		}
 	}
 	return nil
+}
+
+func GetProgressBar(max int) *pb.ProgressBar {
+	bar := pb.NewOptions(max,
+		// pb.OptionSetWriter(ansi.NewAnsiStdout()),
+		pb.OptionEnableColorCodes(true),
+		pb.OptionShowBytes(true),
+		pb.OptionSetWidth(40),
+		pb.OptionShowCount(),
+		pb.OptionThrottle(65*time.Millisecond),
+		pb.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+		pb.OptionSetTheme(pb.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+	return bar
 }
 
 func main() {
@@ -138,12 +220,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	err = InsertTransaction(driver, txs[25])
-	if err != nil {
-		err = errors.Wrap(err, "")
-		log.Fatal(err)
+	var n = len(txs)
+	bar := GetProgressBar(n)
+	defer bar.Close()
+	for _, tx := range txs {
+		err = InsertTransaction(driver, tx)
+		if err != nil {
+			err = errors.Wrap(err, "")
+			log.Fatal(err)
+		}
+		bar.Add(1)
 	}
-
 	fmt.Println("Done!")
 }

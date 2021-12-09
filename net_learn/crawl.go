@@ -173,6 +173,8 @@ func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
 	var all_blocks []Block
 	var n = len(heights)
 	bar := GetProgressBar(n)
+	defer bar.Close()
+
 	for _, h := range heights {
 		bar.Describe(fmt.Sprintf("download txids in block %d :", h))
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(h))
@@ -182,7 +184,6 @@ func (c *Crawler) GetBlocks(heights []int) ([]Block, error) {
 		all_blocks = append(all_blocks, blocks...)
 		bar.Add(1)
 	}
-	bar.Close()
 	return all_blocks, nil
 }
 
@@ -191,6 +192,8 @@ func (c *Crawler) GetBlocksInRange(low, high int) ([]Block, error) {
 	var all_blocks []Block
 	var n = high - low
 	bar := GetProgressBar(n)
+	defer bar.Close()
+
 	for i := low; i < high; i++ {
 		bar.Describe(fmt.Sprintf("downloading txids in block %d :", i))
 		blocks, err := c.GetBlocksByHeights(strconv.Itoa(i))
@@ -200,7 +203,6 @@ func (c *Crawler) GetBlocksInRange(low, high int) ([]Block, error) {
 		all_blocks = append(all_blocks, blocks...)
 		bar.Add(1)
 	}
-	bar.Close()
 	return all_blocks, nil
 }
 
@@ -216,6 +218,7 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 	fmt.Printf("INFO: Downloading block at height %d...\n", block.Height)
 	p, n, tx_hashs := 0, len(block.Tx), ""
 	bar := GetProgressBar(n)
+	defer bar.Close()
 	bar.Describe(fmt.Sprintf("download block %d:", block.Height))
 	var all_txs []Transaction
 	for i, tx_hash := range block.Tx {
@@ -230,7 +233,7 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 				if retry_times < 5 {
 					retry_times++
 					time.Sleep(time.Duration(retry_times*10) * time.Second)
-					fmt.Printf("Retry download block %d for the %d-th time...\n", block.Height, retry_times)
+					fmt.Printf("Retry download block %d for %d time(s)...\n", block.Height, retry_times)
 					goto request
 				}
 				panic(err)
@@ -240,7 +243,6 @@ func (c *Crawler) DownloadOneBlock(block *Block, done chan int) {
 			p, tx_hashs = 0, ""
 		}
 	}
-	bar.Close()
 	obj, err := json.Marshal(all_txs)
 	if err != nil {
 		err = errors.Wrap(err, "Marshal Error")

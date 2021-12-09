@@ -113,6 +113,7 @@ func ReadTransactionDir(blockDir string) ([]Transaction, error) {
 	}
 	n := len(files)
 	bar := GetProgressBar(n)
+	defer bar.Close()
 	for _, file := range files {
 		block_height_path := filepath.Join(blockDir, file.Name())
 		bar.Describe(fmt.Sprintf("loading tx in %s:", file.Name()))
@@ -124,14 +125,15 @@ func ReadTransactionDir(blockDir string) ([]Transaction, error) {
 		all_txs = append(all_txs, txs...)
 		bar.Add(1)
 	}
-	bar.Close()
 	return all_txs, nil
 }
 
 func GetTxInAddrs(tx Transaction) []string {
 	var in_addrs []string
 	for _, utxo := range tx.Inputs {
-		in_addrs = append(in_addrs, utxo.Address)
+		if utxo.Address != "" {
+			in_addrs = append(in_addrs, utxo.Address)
+		}
 	}
 	return in_addrs
 }
@@ -139,7 +141,9 @@ func GetTxInAddrs(tx Transaction) []string {
 func GetTxOutAddrs(tx Transaction) []string {
 	var out_addrs []string
 	for _, utxo := range tx.Outputs {
-		out_addrs = append(out_addrs, utxo.Address)
+		if utxo.Address != "" {
+			out_addrs = append(out_addrs, utxo.Address)
+		}
 	}
 	return out_addrs
 }
